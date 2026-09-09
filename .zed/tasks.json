@@ -1,0 +1,26 @@
+[
+  {
+    "label": "Profile: Memory (Fixed Window)",
+    "command": "just",
+    "args": ["profile-mem", "fixed_window"],
+    "use_new_terminal": false,
+    "allow_concurrent_runs": false,
+    "reveal": "always",
+  },
+  {
+    "label": "Bench: All Algorithms",
+    "command": "just",
+    "args": ["bench-all"],
+    "use_new_terminal": false,
+    "allow_concurrent_runs": false,
+    "reveal": "always",
+  },
+  {
+    "label": "Check: Clippy & Tests",
+    "command": "just",
+    "args": ["check"],
+    "use_new_terminal": false,
+    "allow_concurrent_runs": false,
+    "reveal": "always",
+  },
+]

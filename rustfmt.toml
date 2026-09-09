@@ -1,0 +1,22 @@
+# ==============================================================================
+# Stable Options (Work out of the box on stable toolchains)
+# ==============================================================================
+
+# Maximum line width before breaking expressions.
+# 100 is widely favored in modern codebases over the default 80 for readability on widescreen displays.
+max_width = 100
+
+# Spaces per indentation level (standard Rust convention is 4).
+tab_spaces = 4
+
+# Do not use tabs for indentation.
+hard_tabs = false
+
+# Unix line endings (\n). Essential for cross-platform team consistency.
+newline_style = "Unix"
+
+# Reorder import/use statements alphabetically (std -> external crates -> self/super/crate).
+reorder_imports = true
+
+# Reorder module declarations (`mod foo;`) alphabetically.
+reorder_modules = true

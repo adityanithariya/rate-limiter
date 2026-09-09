@@ -1,0 +1,43 @@
+[package]
+name = "rate-limiter"
+version = "0.1.0"
+edition = "2024"
+
+[[bench]]
+name = "rate_limiter_bench"
+harness = false
+
+[profile.bench]
+debug = true
+opt-level = 3
+
+[profile.release]
+debug = true
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+pprof = { version = "0.14", features = ["flamegraph", "criterion"] }
+
+[dependencies]
+dhat = "0.3.3"
+dashmap = "6.0"
+
+[lints.rust]
+unsafe_code = "warn"
+missing_debug_implementations = "warn"
+
+[lints.clippy]
+# Treat basic Clippy warnings as errors (ideal for clean code)
+all = { level ="warn", priority = -1 }
+
+# Enable opt-in opinionated quality and style lints
+pedantic = { level ="warn", priority = -1 }
+
+# Enable lints that detect unnecessary allocations and slow patterns
+perf = { level ="warn", priority = -1 }
+
+# Common overrides: selectively downgrade excessively noisy pedantic lints
+must_use_candidate = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+module_name_repetitions = "allow"
