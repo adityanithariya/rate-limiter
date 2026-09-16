@@ -15,12 +15,18 @@ opt-level = 3
 debug = true
 
 [dev-dependencies]
-criterion = { version = "0.5", features = ["html_reports"] }
+criterion = { version = "0.5", features = ["async_tokio", "html_reports"] }
 pprof = { version = "0.14", features = ["flamegraph", "criterion"] }
 
 [dependencies]
 dhat = "0.3.3"
 dashmap = "6.0"
+thiserror = "2.0.20"
+anyhow = "1.0.104"
+tokio = { version = "1.53.1", features = ["full", "test-util"] }
+tokio-util = { version = "0.7", features = ["time"] }
+futures-util = "0.3"
+ahash = "0.8.12"
 
 [lints.rust]
 unsafe_code = "warn"

@@ -14,6 +14,9 @@ fmt:
 bench:
     cargo bench --bench rate_limiter_bench
 
+bench-profile:
+    cargo bench --bench rate_limiter_bench -- --profile-time 5
+
 # Run all verification checks (format check, clippy, tests)
 check: fmt-check
     cargo clippy --all-targets --all-features -- -D warnings
@@ -29,6 +32,7 @@ profile-mem algo="fixed_window":
 # Profile all algorithms in sequence
 profile-mem-all:
     @just profile-mem fixed_window
+    @just profile-mem sliding_window_log
 
 # Print full recursive call traces for top memory allocation sites
 report-mem file="dhat-heap.json":

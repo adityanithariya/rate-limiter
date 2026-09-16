@@ -1,14 +1,11 @@
-use std::{
-    num::NonZeroUsize,
-    time::{Duration, Instant},
-};
+use std::{num::NonZeroUsize, time::Duration};
 
 use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
 use pprof::criterion::{Output, PProfProfiler};
 
-// Import your algorithms and limiter
 use rate_limiter::{
     algorithm::{
+        Algorithm,
         fixed_window_counter::{FixedWindowCounter, FixedWindowCounterState},
         sliding_window_log::{SlidingWindowLog, SlidingWindowLogState},
     },
@@ -16,81 +13,104 @@ use rate_limiter::{
     store::memory_store::InMemoryStore,
     types::Quota,
 };
+use tokio::time::Instant;
 
-trait LimiterRunner {
-    fn check_key<'a>(&self, key: &str, now: Instant) -> bool;
-}
+// Concrete rate limiter type aliases for cleaner signatures
+type FixedWindowLimiter =
+    RateLimiter<FixedWindowCounter, InMemoryStore<String, FixedWindowCounterState>>;
+type SlidingWindowLogLimiter =
+    RateLimiter<SlidingWindowLog, InMemoryStore<String, SlidingWindowLogState>>;
 
-impl LimiterRunner
-    for RateLimiter<FixedWindowCounter, InMemoryStore<String, FixedWindowCounterState>>
-{
-    #[inline]
-    fn check_key<'a>(&self, key: &str, now: Instant) -> bool {
-        self.check(key, now)
-    }
-}
-
-impl LimiterRunner for RateLimiter<SlidingWindowLog, InMemoryStore<String, SlidingWindowLogState>> {
-    #[inline]
-    fn check_key<'a>(&self, key: &str, now: Instant) -> bool {
-        self.check(key, now)
-    }
-}
-
-fn build_fixed_window() -> impl LimiterRunner {
+fn build_fixed_window() -> FixedWindowLimiter {
     let quota = Quota::new(NonZeroUsize::new(100_000).unwrap(), Duration::from_secs(60));
     RateLimiter::new(FixedWindowCounter::new(quota), InMemoryStore::new())
 }
 
-fn build_sliding_window_log() -> impl LimiterRunner {
+fn build_sliding_window_log() -> SlidingWindowLogLimiter {
     let quota = Quota::new(NonZeroUsize::new(100_000).unwrap(), Duration::from_secs(60));
     RateLimiter::new(SlidingWindowLog::new(quota), InMemoryStore::new())
 }
 
-fn bench_algorithms(c: &mut Criterion) {
-    let mut group = c.benchmark_group("algorithm_comparison");
-
-    // Algorithms under test: (Display Name, Factory Box)
-    let algorithms: Vec<(&str, Box<dyn Fn() -> Box<dyn LimiterRunner>>)> = vec![
-        ("FixedWindow", Box::new(|| Box::new(build_fixed_window()))),
-        (
-            "SlidingWindowLog",
-            Box::new(|| Box::new(build_sliding_window_log())),
-        ),
-    ];
-
+/// Generic static-dispatch benchmark runner.
+/// Zero dynamic dispatch, zero heap allocation (no Box::pin), pure inlined futures.
+fn bench_limiter_workloads<A, F>(
+    group: &mut criterion::BenchmarkGroup<'_, criterion::measurement::WallTime>,
+    runtime: &tokio::runtime::Runtime,
+    algo_name: &str,
+    factory: F,
+    static_now: Instant,
+    keys: &[String],
+) where
+    A: Algorithm<Input = Instant> + 'static,
+    A::State: 'static,
+    F: Fn() -> RateLimiter<A, InMemoryStore<String, A::State>>,
+{
     // Workload 1: Contended Single Key
-    for (algo_name, factory) in &algorithms {
-        group.bench_function(BenchmarkId::new("single_key", algo_name), |b| {
-            let limiter = factory();
-            let key = "user_static";
+    group.bench_function(BenchmarkId::new("single_key", algo_name), |b| {
+        let limiter = runtime.block_on(async { factory() });
+        let key = "user_static";
 
-            b.iter(|| {
-                let res = limiter.check_key(black_box(key), black_box(Instant::now()));
-                black_box(res);
-            });
+        b.to_async(runtime).iter(|| async {
+            let res = limiter
+                .check::<str>(black_box(key), black_box(static_now))
+                .await;
+            let _ = black_box(res);
         });
-    }
+    });
 
-    // Workload 2: Multi-Tenant / 1,000 Keys (Measure cache thrashing & hash lookup)
+    // Workload 2: Multi-Tenant / 1,000 Keys Round-Robin
+    group.bench_function(BenchmarkId::new("1k_keys_round_robin", algo_name), |b| {
+        let limiter = runtime.block_on(async { factory() });
+        let mut idx = 0usize;
+        let key_count = keys.len();
+
+        b.to_async(runtime).iter(|| {
+            let key = &keys[idx % key_count];
+            idx = idx.wrapping_add(1);
+
+            async {
+                let res = limiter
+                    .check::<str>(black_box(key.as_str()), black_box(static_now))
+                    .await;
+                let _ = black_box(res);
+            }
+        });
+    });
+}
+
+fn bench_algorithms(c: &mut Criterion) {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("Failed to build Tokio runtime");
+
+    let mut group = c.benchmark_group("algorithm_comparison");
+    group.throughput(Throughput::Elements(1));
+
+    let static_now = Instant::now();
+
     const KEY_COUNT: usize = 1_000;
     let keys: Vec<String> = (0..KEY_COUNT).map(|i| format!("user_{i}")).collect();
 
-    for (algo_name, factory) in &algorithms {
-        group.throughput(Throughput::Elements(1));
-        group.bench_function(BenchmarkId::new("1k_keys_round_robin", algo_name), |b| {
-            let limiter = factory();
-            let mut idx = 0;
-            let key = &keys[idx % KEY_COUNT];
+    // 1. Benchmark FixedWindowCounter with zero allocations
+    bench_limiter_workloads(
+        &mut group,
+        &runtime,
+        "FixedWindow",
+        build_fixed_window,
+        static_now,
+        &keys,
+    );
 
-            b.iter(|| {
-                idx = idx.wrapping_add(1);
-
-                let res = limiter.check_key(black_box(key), black_box(Instant::now()));
-                black_box(res);
-            });
-        });
-    }
+    // 2. Benchmark SlidingWindowLog with zero allocations
+    bench_limiter_workloads(
+        &mut group,
+        &runtime,
+        "SlidingWindowLog",
+        build_sliding_window_log,
+        static_now,
+        &keys,
+    );
 
     group.finish();
 }

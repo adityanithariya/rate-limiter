@@ -24,3 +24,6 @@ impl Quota {
         self.window
     }
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Version(pub u64);

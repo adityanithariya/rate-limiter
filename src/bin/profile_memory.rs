@@ -1,8 +1,4 @@
-use std::{
-    env,
-    num::NonZeroUsize,
-    time::{Duration, Instant},
-};
+use std::{env, num::NonZeroUsize, time::Duration};
 
 use rate_limiter::{
     algorithm::{
@@ -13,18 +9,19 @@ use rate_limiter::{
     store::memory_store::InMemoryStore,
     types::Quota,
 };
+use tokio::time::Instant;
 
 #[global_allocator]
 static ALLOC: dhat::Alloc = dhat::Alloc;
 
 trait ProfileRunner {
-    fn check_key(&self, key: &str, now: Instant) -> bool;
+    async fn check_key(&self, key: &str, now: Instant) -> bool;
 
-    fn run_workload(&self, hits_per_key: usize, keys: &[String]) {
+    async fn run_workload(&self, hits_per_key: usize, keys: &[String]) {
         let now = Instant::now();
         for _ in 0..hits_per_key {
             for key in keys {
-                let _ = self.check_key(key, now);
+                let _ = self.check_key(key, now).await;
             }
         }
     }
@@ -35,19 +32,26 @@ impl ProfileRunner
     for RateLimiter<FixedWindowCounter, InMemoryStore<String, FixedWindowCounterState>>
 {
     #[inline]
-    fn check_key(&self, key: &str, now: Instant) -> bool {
-        self.check(key, now)
+    async fn check_key(&self, key: &str, now: Instant) -> bool {
+        match self.check(key, now).await {
+            Ok(_) => true,
+            Err(_) => false,
+        }
     }
 }
 
 impl ProfileRunner for RateLimiter<SlidingWindowLog, InMemoryStore<String, SlidingWindowLogState>> {
     #[inline]
-    fn check_key(&self, key: &str, now: Instant) -> bool {
-        self.check(key, now)
+    async fn check_key(&self, key: &str, now: Instant) -> bool {
+        match self.check(key, now).await {
+            Ok(_) => true,
+            Err(_) => false,
+        }
     }
 }
 
-fn main() {
+#[tokio::main(flavor = "current_thread")]
+async fn main() {
     let args: Vec<String> = env::args().collect();
     let algo = args.get(1).map(String::as_str).unwrap_or("fixed_window");
 
@@ -67,7 +71,12 @@ fn main() {
                 FixedWindowCounter::new(quota),
                 InMemoryStore::with_capacity(NUM_KEYS),
             );
-            limiter.run_workload(HITS_PER_KEY, &keys);
+            limiter.run_workload(HITS_PER_KEY, &keys).await;
+
+            tokio::time::pause();
+            tokio::time::advance(Duration::from_secs(61)).await;
+            tokio::task::yield_now().await;
+            tokio::time::sleep(Duration::from_millis(10)).await;
         }
         "sliding_window_log" => {
             let quota = Quota::new(NonZeroUsize::new(100_000).unwrap(), Duration::from_secs(60));
@@ -75,7 +84,12 @@ fn main() {
                 SlidingWindowLog::new(quota),
                 InMemoryStore::with_capacity(NUM_KEYS),
             );
-            limiter.run_workload(HITS_PER_KEY, &keys);
+            limiter.run_workload(HITS_PER_KEY, &keys).await;
+
+            tokio::time::pause();
+            tokio::time::advance(Duration::from_secs(61)).await;
+            tokio::task::yield_now().await;
+            tokio::time::sleep(Duration::from_millis(10)).await;
         }
         unknown => {
             eprintln!("Unknown algorithm: {unknown}");
