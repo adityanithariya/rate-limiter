@@ -6,7 +6,8 @@ use dashmap::DashMap;
 use futures_util::StreamExt;
 use std::{borrow::Borrow, hash::Hash, sync::Arc};
 use thiserror::Error;
-use tokio::{sync::mpsc, time::Instant};
+use tokio::sync::mpsc;
+use tokio::time::Instant;
 use tokio_util::time::DelayQueue;
 
 #[derive(Debug)]
@@ -96,7 +97,7 @@ pub enum InMemoryStoreError {
 impl<K, V> Store for InMemoryStore<K, V>
 where
     K: Hash + Eq + Clone + Send + Sync + 'static,
-    V: Send + Sync + 'static,
+    V: Clone + Send + Sync + 'static,
     KeyRef<K>: Borrow<K>,
 {
     type Key = K;
@@ -118,7 +119,6 @@ where
         F: FnOnce(&mut Entry<Self::State>) -> (R, Eviction) + Send + Sync,
     {
         let (res, version, eviction, key_arc) = if let Some(mut state) = self.data.get_mut(key) {
-            state.value_mut().update_version();
             let res = mutate(&mut state.value_mut());
             let task_key = Arc::clone(&state.key().0);
             (res.0, state.value().version, res.1, task_key)
@@ -140,5 +140,17 @@ where
             let _ = self.tx.try_send(task);
         }
         std::future::ready(Ok(res))
+    }
+
+    fn remove_if<Q>(
+        &self,
+        key: &Q,
+        f: impl FnOnce(&KeyRef<Self::Key>, &Entry<V>) -> bool,
+    ) -> Option<(KeyRef<Self::Key>, Entry<V>)>
+    where
+        KeyRef<Self::Key>: Borrow<Q>,
+        Q: ?Sized + Hash + Eq + ToOwned<Owned = Self::Key>,
+    {
+        self.data.remove_if(key, f)
     }
 }

@@ -4,7 +4,7 @@ use rate_limiter::{
     algorithm::fixed_window_counter::{FixedWindowCounter, FixedWindowCounterState},
     limiter::RateLimiter,
     store::memory_store::InMemoryStore,
-    types::Quota,
+    types::{Quota, SecondDuration},
 };
 use tokio::{
     task::JoinSet,
@@ -15,7 +15,7 @@ use tokio::{
 async fn main() {
     let fixed_window_counter = FixedWindowCounter::new(Quota::new(
         NonZeroUsize::new(30).unwrap(),
-        Duration::from_mins(1),
+        SecondDuration::try_from(Duration::from_mins(1)).unwrap(),
     ));
     let memory_store: InMemoryStore<String, FixedWindowCounterState> =
         InMemoryStore::with_capacity(100);

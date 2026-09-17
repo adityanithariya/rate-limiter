@@ -3,11 +3,14 @@ use std::{env, num::NonZeroUsize, time::Duration};
 use rate_limiter::{
     algorithm::{
         fixed_window_counter::{FixedWindowCounter, FixedWindowCounterState},
+        leaky_bucket::{LeakyBucket, LeakyBucketCheck, LeakyBucketState},
+        sliding_window_counter::{SlidingWindowCounter, SlidingWindowCounterState},
         sliding_window_log::{SlidingWindowLog, SlidingWindowLogState},
+        token_bucket::{TokenBucket, TokenBucketCheck, TokenBucketState},
     },
     limiter::RateLimiter,
     store::memory_store::InMemoryStore,
-    types::Quota,
+    types::{Quota, SecondDuration},
 };
 use tokio::time::Instant;
 
@@ -50,6 +53,54 @@ impl ProfileRunner for RateLimiter<SlidingWindowLog, InMemoryStore<String, Slidi
     }
 }
 
+impl ProfileRunner
+    for RateLimiter<SlidingWindowCounter, InMemoryStore<String, SlidingWindowCounterState>>
+{
+    #[inline]
+    async fn check_key(&self, key: &str, now: Instant) -> bool {
+        match self.check(key, now).await {
+            Ok(_) => true,
+            Err(_) => false,
+        }
+    }
+}
+
+impl ProfileRunner for RateLimiter<TokenBucket, InMemoryStore<String, TokenBucketState>> {
+    #[inline]
+    async fn check_key(&self, key: &str, now: Instant) -> bool {
+        match self
+            .check(
+                key,
+                TokenBucketCheck::new(now, NonZeroUsize::new(1).unwrap()),
+            )
+            .await
+        {
+            Ok(_) => true,
+            Err(_) => false,
+        }
+    }
+}
+
+impl ProfileRunner for RateLimiter<LeakyBucket, InMemoryStore<String, LeakyBucketState>> {
+    #[inline]
+    async fn check_key(&self, key: &str, now: Instant) -> bool {
+        match self
+            .check(
+                key,
+                LeakyBucketCheck::new(
+                    now,
+                    NonZeroUsize::new(1).unwrap(),
+                    SecondDuration::try_from(Duration::from_secs(10)).unwrap(),
+                ),
+            )
+            .await
+        {
+            Ok(_) => true,
+            Err(_) => false,
+        }
+    }
+}
+
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
     let args: Vec<String> = env::args().collect();
@@ -66,7 +117,10 @@ async fn main() {
 
     match algo {
         "fixed_window" => {
-            let quota = Quota::new(NonZeroUsize::new(100_000).unwrap(), Duration::from_secs(60));
+            let quota = Quota::new(
+                NonZeroUsize::new(100_000).unwrap(),
+                SecondDuration::try_from(Duration::from_secs(60)).unwrap(),
+            );
             let limiter = RateLimiter::new(
                 FixedWindowCounter::new(quota),
                 InMemoryStore::with_capacity(NUM_KEYS),
@@ -79,9 +133,60 @@ async fn main() {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
         "sliding_window_log" => {
-            let quota = Quota::new(NonZeroUsize::new(100_000).unwrap(), Duration::from_secs(60));
+            let quota = Quota::new(
+                NonZeroUsize::new(100_000).unwrap(),
+                SecondDuration::try_from(Duration::from_secs(60)).unwrap(),
+            );
             let limiter = RateLimiter::new(
                 SlidingWindowLog::new(quota),
+                InMemoryStore::with_capacity(NUM_KEYS),
+            );
+            limiter.run_workload(HITS_PER_KEY, &keys).await;
+
+            tokio::time::pause();
+            tokio::time::advance(Duration::from_secs(61)).await;
+            tokio::task::yield_now().await;
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        "sliding_window_counter" => {
+            let quota = Quota::new(
+                NonZeroUsize::new(100_000).unwrap(),
+                SecondDuration::try_from(Duration::from_secs(60)).unwrap(),
+            );
+            let limiter = RateLimiter::new(
+                SlidingWindowCounter::new(quota),
+                InMemoryStore::with_capacity(NUM_KEYS),
+            );
+            limiter.run_workload(HITS_PER_KEY, &keys).await;
+
+            tokio::time::pause();
+            tokio::time::advance(Duration::from_secs(61)).await;
+            tokio::task::yield_now().await;
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        "token_bucket" => {
+            let quota = Quota::new(
+                NonZeroUsize::new(100_000).unwrap(),
+                SecondDuration::try_from(Duration::from_secs(60)).unwrap(),
+            );
+            let limiter = RateLimiter::new(
+                TokenBucket::new(quota),
+                InMemoryStore::with_capacity(NUM_KEYS),
+            );
+            limiter.run_workload(HITS_PER_KEY, &keys).await;
+
+            tokio::time::pause();
+            tokio::time::advance(Duration::from_secs(61)).await;
+            tokio::task::yield_now().await;
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        "leaky_bucket" => {
+            let quota = Quota::new(
+                NonZeroUsize::new(100_000).unwrap(),
+                SecondDuration::try_from(Duration::from_secs(60)).unwrap(),
+            );
+            let limiter = RateLimiter::new(
+                LeakyBucket::new(quota),
                 InMemoryStore::with_capacity(NUM_KEYS),
             );
             limiter.run_workload(HITS_PER_KEY, &keys).await;

@@ -53,9 +53,18 @@ pub trait Store: Send + Sync {
         R: Send,
         I: FnOnce() -> Self::State + Send,
         F: FnOnce(&mut Entry<Self::State>) -> (R, Eviction) + Send + Sync;
+
+    fn remove_if<Q>(
+        &self,
+        key: &Q,
+        f: impl FnOnce(&KeyRef<Self::Key>, &Entry<Self::State>) -> bool,
+    ) -> Option<(KeyRef<Self::Key>, Entry<Self::State>)>
+    where
+        KeyRef<Self::Key>: Borrow<Q>,
+        Q: ?Sized + Hash + Eq + ToOwned<Owned = Self::Key>;
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct Entry<S> {
     pub state: S,
     pub version: Version,

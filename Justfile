@@ -33,6 +33,9 @@ profile-mem algo="fixed_window":
 profile-mem-all:
     @just profile-mem fixed_window
     @just profile-mem sliding_window_log
+    @just profile-mem sliding_window_counter
+    @just profile-mem token_bucket
+    @just profile-mem leaky_bucket
 
 # Print full recursive call traces for top memory allocation sites
 report-mem file="dhat-heap.json":

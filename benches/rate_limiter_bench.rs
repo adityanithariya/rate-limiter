@@ -7,11 +7,14 @@ use rate_limiter::{
     algorithm::{
         Algorithm,
         fixed_window_counter::{FixedWindowCounter, FixedWindowCounterState},
+        leaky_bucket::{LeakyBucket, LeakyBucketCheck, LeakyBucketState},
+        sliding_window_counter::{SlidingWindowCounter, SlidingWindowCounterState},
         sliding_window_log::{SlidingWindowLog, SlidingWindowLogState},
+        token_bucket::{TokenBucket, TokenBucketCheck, TokenBucketState},
     },
     limiter::RateLimiter,
     store::memory_store::InMemoryStore,
-    types::Quota,
+    types::{Quota, SecondDuration},
 };
 use tokio::time::Instant;
 
@@ -20,15 +23,49 @@ type FixedWindowLimiter =
     RateLimiter<FixedWindowCounter, InMemoryStore<String, FixedWindowCounterState>>;
 type SlidingWindowLogLimiter =
     RateLimiter<SlidingWindowLog, InMemoryStore<String, SlidingWindowLogState>>;
+type SlidingWindowCounterLimiter =
+    RateLimiter<SlidingWindowCounter, InMemoryStore<String, SlidingWindowCounterState>>;
+type TokenBucketLimiter = RateLimiter<TokenBucket, InMemoryStore<String, TokenBucketState>>;
+type LeakyBucketLimiter = RateLimiter<LeakyBucket, InMemoryStore<String, LeakyBucketState>>;
 
 fn build_fixed_window() -> FixedWindowLimiter {
-    let quota = Quota::new(NonZeroUsize::new(100_000).unwrap(), Duration::from_secs(60));
+    let quota = Quota::new(
+        NonZeroUsize::new(100_000).unwrap(),
+        SecondDuration::try_from(Duration::from_secs(60)).unwrap(),
+    );
     RateLimiter::new(FixedWindowCounter::new(quota), InMemoryStore::new())
 }
 
 fn build_sliding_window_log() -> SlidingWindowLogLimiter {
-    let quota = Quota::new(NonZeroUsize::new(100_000).unwrap(), Duration::from_secs(60));
+    let quota = Quota::new(
+        NonZeroUsize::new(100_000).unwrap(),
+        SecondDuration::try_from(Duration::from_secs(60)).unwrap(),
+    );
     RateLimiter::new(SlidingWindowLog::new(quota), InMemoryStore::new())
+}
+
+fn build_sliding_window_counter() -> SlidingWindowCounterLimiter {
+    let quota = Quota::new(
+        NonZeroUsize::new(100_000).unwrap(),
+        SecondDuration::try_from(Duration::from_secs(60)).unwrap(),
+    );
+    RateLimiter::new(SlidingWindowCounter::new(quota), InMemoryStore::new())
+}
+
+fn build_token_bucket() -> TokenBucketLimiter {
+    let quota = Quota::new(
+        NonZeroUsize::new(100_000).unwrap(),
+        SecondDuration::try_from(Duration::from_secs(60)).unwrap(),
+    );
+    RateLimiter::new(TokenBucket::new(quota), InMemoryStore::new())
+}
+
+fn build_leaky_bucket() -> LeakyBucketLimiter {
+    let quota = Quota::new(
+        NonZeroUsize::new(100_000).unwrap(),
+        SecondDuration::try_from(Duration::from_secs(60)).unwrap(),
+    );
+    RateLimiter::new(LeakyBucket::new(quota), InMemoryStore::new())
 }
 
 /// Generic static-dispatch benchmark runner.
@@ -38,10 +75,10 @@ fn bench_limiter_workloads<A, F>(
     runtime: &tokio::runtime::Runtime,
     algo_name: &str,
     factory: F,
-    static_now: Instant,
+    static_now: A::Input,
     keys: &[String],
 ) where
-    A: Algorithm<Input = Instant> + 'static,
+    A: Algorithm + 'static,
     A::State: 'static,
     F: Fn() -> RateLimiter<A, InMemoryStore<String, A::State>>,
 {
@@ -109,6 +146,37 @@ fn bench_algorithms(c: &mut Criterion) {
         "SlidingWindowLog",
         build_sliding_window_log,
         static_now,
+        &keys,
+    );
+
+    bench_limiter_workloads(
+        &mut group,
+        &runtime,
+        "SlidingWindowCounter",
+        build_sliding_window_counter,
+        static_now,
+        &keys,
+    );
+
+    bench_limiter_workloads(
+        &mut group,
+        &runtime,
+        "TokenBucket",
+        build_token_bucket,
+        TokenBucketCheck::new(static_now, NonZeroUsize::new(1).unwrap()),
+        &keys,
+    );
+
+    bench_limiter_workloads(
+        &mut group,
+        &runtime,
+        "LeakyBucket",
+        build_leaky_bucket,
+        LeakyBucketCheck::new(
+            static_now,
+            NonZeroUsize::new(1).unwrap(),
+            SecondDuration::try_from(Duration::from_secs(10)).unwrap(),
+        ),
         &keys,
     );
 
