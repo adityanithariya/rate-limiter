@@ -33,7 +33,14 @@ fn build_fixed_window() -> FixedWindowLimiter {
         NonZeroUsize::new(100_000).unwrap(),
         SecondDuration::try_from(Duration::from_secs(60)).unwrap(),
     );
-    RateLimiter::new(FixedWindowCounter::new(quota), InMemoryStore::new())
+    let max_idle = SecondDuration::try_from(Duration::from_secs(61)).unwrap();
+    let sweep_interval = SecondDuration::try_from(Duration::from_mins(2)).unwrap();
+    RateLimiter::new(
+        FixedWindowCounter::new(quota),
+        InMemoryStore::new(),
+        max_idle,
+        sweep_interval,
+    )
 }
 
 fn build_sliding_window_log() -> SlidingWindowLogLimiter {
@@ -41,7 +48,14 @@ fn build_sliding_window_log() -> SlidingWindowLogLimiter {
         NonZeroUsize::new(100_000).unwrap(),
         SecondDuration::try_from(Duration::from_secs(60)).unwrap(),
     );
-    RateLimiter::new(SlidingWindowLog::new(quota), InMemoryStore::new())
+    let max_idle = SecondDuration::try_from(Duration::from_secs(61)).unwrap();
+    let sweep_interval = SecondDuration::try_from(Duration::from_mins(2)).unwrap();
+    RateLimiter::new(
+        SlidingWindowLog::new(quota),
+        InMemoryStore::new(),
+        max_idle,
+        sweep_interval,
+    )
 }
 
 fn build_sliding_window_counter() -> SlidingWindowCounterLimiter {
@@ -49,7 +63,14 @@ fn build_sliding_window_counter() -> SlidingWindowCounterLimiter {
         NonZeroUsize::new(100_000).unwrap(),
         SecondDuration::try_from(Duration::from_secs(60)).unwrap(),
     );
-    RateLimiter::new(SlidingWindowCounter::new(quota), InMemoryStore::new())
+    let max_idle = SecondDuration::try_from(Duration::from_secs(121)).unwrap();
+    let sweep_interval = SecondDuration::try_from(Duration::from_mins(2)).unwrap();
+    RateLimiter::new(
+        SlidingWindowCounter::new(quota),
+        InMemoryStore::new(),
+        max_idle,
+        sweep_interval,
+    )
 }
 
 fn build_token_bucket() -> TokenBucketLimiter {
@@ -57,7 +78,14 @@ fn build_token_bucket() -> TokenBucketLimiter {
         NonZeroUsize::new(100_000).unwrap(),
         SecondDuration::try_from(Duration::from_secs(60)).unwrap(),
     );
-    RateLimiter::new(TokenBucket::new(quota), InMemoryStore::new())
+    let max_idle = SecondDuration::try_from(Duration::from_secs(61)).unwrap();
+    let sweep_interval = SecondDuration::try_from(Duration::from_mins(2)).unwrap();
+    RateLimiter::new(
+        TokenBucket::new(quota),
+        InMemoryStore::new(),
+        max_idle,
+        sweep_interval,
+    )
 }
 
 fn build_leaky_bucket() -> LeakyBucketLimiter {
@@ -65,7 +93,14 @@ fn build_leaky_bucket() -> LeakyBucketLimiter {
         NonZeroUsize::new(100_000).unwrap(),
         SecondDuration::try_from(Duration::from_secs(60)).unwrap(),
     );
-    RateLimiter::new(LeakyBucket::new(quota), InMemoryStore::new())
+    let max_idle = SecondDuration::try_from(Duration::from_secs(61)).unwrap();
+    let sweep_interval = SecondDuration::try_from(Duration::from_mins(2)).unwrap();
+    RateLimiter::new(
+        LeakyBucket::new(quota),
+        InMemoryStore::new(),
+        max_idle,
+        sweep_interval,
+    )
 }
 
 /// Generic static-dispatch benchmark runner.
@@ -135,7 +170,7 @@ fn bench_algorithms(c: &mut Criterion) {
         &runtime,
         "FixedWindow",
         build_fixed_window,
-        static_now,
+        static_now.into(),
         &keys,
     );
 
@@ -145,7 +180,7 @@ fn bench_algorithms(c: &mut Criterion) {
         &runtime,
         "SlidingWindowLog",
         build_sliding_window_log,
-        static_now,
+        static_now.into(),
         &keys,
     );
 
@@ -154,7 +189,7 @@ fn bench_algorithms(c: &mut Criterion) {
         &runtime,
         "SlidingWindowCounter",
         build_sliding_window_counter,
-        static_now,
+        static_now.into(),
         &keys,
     );
 

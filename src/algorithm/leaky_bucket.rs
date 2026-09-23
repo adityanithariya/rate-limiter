@@ -1,15 +1,12 @@
-use std::{num::NonZeroUsize, time::Duration};
-
-use tokio::time::Instant;
-
 use crate::{
     algorithm::{
         Algorithm,
         types::{Allowed, RateLimitDecision, Rejected},
     },
-    store::eviction::Eviction,
     types::{Quota, SecondDuration},
 };
+use std::{num::NonZeroUsize, time::Duration};
+use tokio::time::Instant;
 
 #[derive(Debug, Clone, Copy)]
 pub struct LeakyBucketState {
@@ -31,6 +28,24 @@ impl LeakyBucketCheck {
             now,
             cost,
             max_wait,
+        }
+    }
+
+    // fn eviction(
+    //     &self,
+    //     state: &LeakyBucketState,
+    //     input: LeakyBucketCheck,
+    // ) -> crate::store::eviction::Eviction {
+    //     Eviction::new(state.tat >= input.now, Some(state.tat))
+    // }
+}
+
+impl Default for LeakyBucketCheck {
+    fn default() -> Self {
+        LeakyBucketCheck {
+            now: Instant::now(),
+            cost: NonZeroUsize::new(1).unwrap(),
+            max_wait: SecondDuration::try_from(Duration::from_secs(10)).unwrap(),
         }
     }
 }
@@ -98,13 +113,5 @@ impl Algorithm for LeakyBucket {
             let wait_duration = delay_needed - self.burst_tolerance;
             RateLimitDecision::WaitUntil(input.now + wait_duration)
         }
-    }
-
-    fn eviction(
-        &self,
-        state: &Self::State,
-        input: Self::Input,
-    ) -> crate::store::eviction::Eviction {
-        Eviction::new(state.tat >= input.now, Some(state.tat))
     }
 }

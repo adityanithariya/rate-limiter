@@ -1,6 +1,6 @@
 use crate::types::Version;
-use eviction::Eviction;
-use std::{borrow::Borrow, error::Error, hash::Hash, sync::Arc};
+use std::{borrow::Borrow, error::Error, hash::Hash, sync::Arc, time::Duration};
+use tokio::time::Instant;
 
 pub mod eviction;
 pub mod memory_store;
@@ -44,6 +44,7 @@ pub trait Store: Send + Sync {
     fn update<Q, I, F, R>(
         &self,
         key: &Q,
+        now: Instant,
         init: I,
         mutate: F,
     ) -> impl Future<Output = Result<R, Self::Error>> + Send
@@ -52,36 +53,35 @@ pub trait Store: Send + Sync {
         Q: ?Sized + Hash + Eq + ToOwned<Owned = Self::Key>,
         R: Send,
         I: FnOnce() -> Self::State + Send,
-        F: FnOnce(&mut Entry<Self::State>) -> (R, Eviction) + Send + Sync;
+        F: FnOnce(&mut Self::State) -> R + Send + Sync;
 
-    fn remove_if<Q>(
-        &self,
-        key: &Q,
-        f: impl FnOnce(&KeyRef<Self::Key>, &Entry<Self::State>) -> bool,
-    ) -> Option<(KeyRef<Self::Key>, Entry<Self::State>)>
-    where
-        KeyRef<Self::Key>: Borrow<Q>,
-        Q: ?Sized + Hash + Eq + ToOwned<Owned = Self::Key>;
+    /// Remove every entry idle for longer than `max_idle`. Returns the count removed.
+    /// Only ever called from the background sweep task, never from `check()`.
+    fn evict_idle(&self, now: Instant, max_idle: Duration) -> usize;
 }
 
 #[derive(Debug, Clone, Copy)]
 pub struct Entry<S> {
     pub state: S,
     pub version: Version,
+    pub last_accessed: Instant,
 }
 
 impl<S> Entry<S>
 where
     S: Send + Sync,
 {
-    pub fn new(state: S) -> Self {
+    pub fn new(state: S, now: Instant) -> Self {
         Entry {
             state,
             version: Version(0),
+            last_accessed: now,
         }
     }
 
-    pub fn update_version(&mut self) {
+    #[inline]
+    pub fn touch(&mut self, now: Instant) {
+        self.last_accessed = now;
         self.version.0 += 1;
     }
 }

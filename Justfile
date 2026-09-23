@@ -36,6 +36,14 @@ profile-mem-all:
     @just profile-mem sliding_window_counter
     @just profile-mem token_bucket
     @just profile-mem leaky_bucket
+    @jq -n \
+          --slurpfile fw  profiles/dhat-fixed_window.json \
+          --slurpfile swl profiles/dhat-sliding_window_log.json \
+          --slurpfile swc profiles/dhat-sliding_window_counter.json \
+          --slurpfile tb  profiles/dhat-token_bucket.json \
+          --slurpfile lb  profiles/dhat-leaky_bucket.json \
+          '{ fixed_window: $fw[0], sliding_window_log: $swl[0], sliding_window_counter: $swc[0], token_bucket: $tb[0], leaky_bucket: $lb[0] }' \
+          > profiles/dhat.json
 
 # Print full recursive call traces for top memory allocation sites
 report-mem file="dhat-heap.json":
@@ -44,7 +52,7 @@ report-mem file="dhat-heap.json":
     import sys
     from pathlib import Path
 
-    path = Path("{{file}}")
+    path = Path("{{ file }}")
     if not path.exists():
         print(f"File not found: {path}")
         sys.exit(1)

@@ -36,7 +36,7 @@ impl ProfileRunner
 {
     #[inline]
     async fn check_key(&self, key: &str, now: Instant) -> bool {
-        match self.check(key, now).await {
+        match self.check(key, now.into()).await {
             Ok(_) => true,
             Err(_) => false,
         }
@@ -46,7 +46,7 @@ impl ProfileRunner
 impl ProfileRunner for RateLimiter<SlidingWindowLog, InMemoryStore<String, SlidingWindowLogState>> {
     #[inline]
     async fn check_key(&self, key: &str, now: Instant) -> bool {
-        match self.check(key, now).await {
+        match self.check(key, now.into()).await {
             Ok(_) => true,
             Err(_) => false,
         }
@@ -58,7 +58,7 @@ impl ProfileRunner
 {
     #[inline]
     async fn check_key(&self, key: &str, now: Instant) -> bool {
-        match self.check(key, now).await {
+        match self.check(key, now.into()).await {
             Ok(_) => true,
             Err(_) => false,
         }
@@ -121,9 +121,13 @@ async fn main() {
                 NonZeroUsize::new(100_000).unwrap(),
                 SecondDuration::try_from(Duration::from_secs(60)).unwrap(),
             );
+            let max_idle = SecondDuration::try_from(Duration::from_secs(61)).unwrap();
+            let sweep_interval = SecondDuration::try_from(Duration::from_mins(2)).unwrap();
             let limiter = RateLimiter::new(
                 FixedWindowCounter::new(quota),
                 InMemoryStore::with_capacity(NUM_KEYS),
+                max_idle,
+                sweep_interval,
             );
             limiter.run_workload(HITS_PER_KEY, &keys).await;
 
@@ -137,14 +141,18 @@ async fn main() {
                 NonZeroUsize::new(100_000).unwrap(),
                 SecondDuration::try_from(Duration::from_secs(60)).unwrap(),
             );
+            let max_idle = SecondDuration::try_from(Duration::from_secs(61)).unwrap();
+            let sweep_interval = SecondDuration::try_from(Duration::from_mins(2)).unwrap();
             let limiter = RateLimiter::new(
                 SlidingWindowLog::new(quota),
                 InMemoryStore::with_capacity(NUM_KEYS),
+                max_idle,
+                sweep_interval,
             );
             limiter.run_workload(HITS_PER_KEY, &keys).await;
 
             tokio::time::pause();
-            tokio::time::advance(Duration::from_secs(61)).await;
+            tokio::time::advance(Duration::from_secs(62)).await;
             tokio::task::yield_now().await;
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
@@ -153,14 +161,19 @@ async fn main() {
                 NonZeroUsize::new(100_000).unwrap(),
                 SecondDuration::try_from(Duration::from_secs(60)).unwrap(),
             );
+            let max_idle = SecondDuration::try_from(Duration::from_secs(121)).unwrap();
+            let sweep_interval = SecondDuration::try_from(Duration::from_secs(122)).unwrap();
+
             let limiter = RateLimiter::new(
                 SlidingWindowCounter::new(quota),
                 InMemoryStore::with_capacity(NUM_KEYS),
+                max_idle,
+                sweep_interval,
             );
             limiter.run_workload(HITS_PER_KEY, &keys).await;
 
             tokio::time::pause();
-            tokio::time::advance(Duration::from_secs(61)).await;
+            tokio::time::advance(Duration::from_secs(121)).await;
             tokio::task::yield_now().await;
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
@@ -169,9 +182,14 @@ async fn main() {
                 NonZeroUsize::new(100_000).unwrap(),
                 SecondDuration::try_from(Duration::from_secs(60)).unwrap(),
             );
+            let max_idle = SecondDuration::try_from(Duration::from_secs(61)).unwrap();
+            let sweep_interval = SecondDuration::try_from(Duration::from_mins(2)).unwrap();
+
             let limiter = RateLimiter::new(
                 TokenBucket::new(quota),
                 InMemoryStore::with_capacity(NUM_KEYS),
+                max_idle,
+                sweep_interval,
             );
             limiter.run_workload(HITS_PER_KEY, &keys).await;
 
@@ -185,9 +203,14 @@ async fn main() {
                 NonZeroUsize::new(100_000).unwrap(),
                 SecondDuration::try_from(Duration::from_secs(60)).unwrap(),
             );
+            let max_idle = SecondDuration::try_from(Duration::from_secs(61)).unwrap();
+            let sweep_interval = SecondDuration::try_from(Duration::from_mins(2)).unwrap();
+
             let limiter = RateLimiter::new(
                 LeakyBucket::new(quota),
                 InMemoryStore::with_capacity(NUM_KEYS),
+                max_idle,
+                sweep_interval,
             );
             limiter.run_workload(HITS_PER_KEY, &keys).await;
 

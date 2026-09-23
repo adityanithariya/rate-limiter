@@ -19,13 +19,20 @@ async fn main() {
     ));
     let memory_store: InMemoryStore<String, FixedWindowCounterState> =
         InMemoryStore::with_capacity(100);
-    let rate_limiter = Arc::new(RateLimiter::new(fixed_window_counter, memory_store));
+    let max_idle = SecondDuration::try_from(Duration::from_secs(61)).unwrap();
+    let sweep_interval = SecondDuration::try_from(Duration::from_mins(2)).unwrap();
+    let rate_limiter = Arc::new(RateLimiter::new(
+        fixed_window_counter,
+        memory_store,
+        max_idle,
+        sweep_interval,
+    ));
 
     let mut set = JoinSet::new();
     for i in 0..200 {
         let rlm = Arc::clone(&rate_limiter);
         set.spawn(async move {
-            let res = rlm.check("user1", Instant::now()).await;
+            let res = rlm.check("user1", Instant::now().into()).await;
             match res {
                 Ok(check) => println!("{i} {check:?}"),
                 Err(err) => println!("Error: {err:?}"),

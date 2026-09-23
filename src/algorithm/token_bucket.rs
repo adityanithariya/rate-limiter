@@ -1,14 +1,10 @@
-use std::{num::NonZeroUsize, time::Duration};
-
-use tokio::time::Instant;
-
+use super::Algorithm;
 use crate::{
     algorithm::types::{Allowed, RateLimitDecision, Rejected},
-    store::eviction::Eviction,
     types::Quota,
 };
-
-use super::Algorithm;
+use std::{num::NonZeroUsize, time::Duration};
+use tokio::time::Instant;
 
 #[derive(Debug, Clone, Copy)]
 pub struct TokenBucketState {
@@ -26,6 +22,15 @@ impl TokenBucketCheck {
     #[inline]
     pub fn new(now: Instant, cost: NonZeroUsize) -> Self {
         Self { now, cost }
+    }
+}
+
+impl Default for TokenBucketCheck {
+    fn default() -> Self {
+        Self {
+            now: Instant::now(),
+            cost: NonZeroUsize::new(1).unwrap(),
+        }
     }
 }
 
@@ -48,6 +53,22 @@ impl TokenBucket {
         }
     }
 
+    fn refill_tokens(&self, state: &mut TokenBucketState, input: &TokenBucketCheck) {
+        if state.tokens < self.max_capacity {
+            let elapsed_ns = input
+                .now
+                .saturating_duration_since(state.last_request_time)
+                .as_nanos() as f64;
+            if elapsed_ns > 0.0 {
+                let refilled_tokens = state.tokens + elapsed_ns * self.refill_rate;
+                state.tokens = refilled_tokens.min(self.max_capacity);
+                state.last_request_time = input.now;
+            }
+        } else {
+            state.last_request_time = input.now;
+        }
+    }
+
     #[inline(always)]
     fn duration_for_tokens(&self, missing_tokens: f64) -> Duration {
         if missing_tokens <= 0.0 || !self.emission_interval.is_finite() {
@@ -56,6 +77,32 @@ impl TokenBucket {
         let nanos = (missing_tokens * self.emission_interval) as u64;
         Duration::from_nanos(nanos)
     }
+
+    // #[inline]
+    // fn eviction(
+    //     &self,
+    //     state: &TokenBucketState,
+    //     input: TokenBucketCheck,
+    // ) -> crate::store::eviction::Eviction {
+    //     // let mut new_state = state.clone();
+    //     // self.refill_tokens(&mut new_state, &input);
+    //     // if new_state.tokens == self.max_capacity {
+    //     //     return Eviction::new(true, None);
+    //     // }
+
+    //     let missing_tokens = self.max_capacity - state.tokens;
+    //     let refill_ns = missing_tokens / self.refill_rate;
+    //     let refill_duration = if refill_ns.is_finite() {
+    //         Duration::from_nanos(refill_ns as u64)
+    //     } else {
+    //         Duration::ZERO
+    //     };
+
+    //     Eviction::new(
+    //         missing_tokens.abs() < f64::EPSILON,
+    //         Some(input.now + refill_duration),
+    //     )
+    // }
 }
 
 impl Algorithm for TokenBucket {
@@ -78,19 +125,7 @@ impl Algorithm for TokenBucket {
             return RateLimitDecision::Rejected(Rejected { retry_after: None });
         }
 
-        if state.tokens < self.max_capacity {
-            let elapsed_ns = input
-                .now
-                .saturating_duration_since(state.last_request_time)
-                .as_nanos() as f64;
-            if elapsed_ns > 0.0 {
-                let refilled_tokens = state.tokens + elapsed_ns * self.refill_rate;
-                state.tokens = refilled_tokens.min(self.max_capacity);
-                state.last_request_time = input.now;
-            }
-        } else {
-            state.last_request_time = input.now;
-        }
+        self.refill_tokens(state, &input);
 
         if state.tokens < cost {
             let deficit = cost - state.tokens;
@@ -105,25 +140,5 @@ impl Algorithm for TokenBucket {
         return RateLimitDecision::Allowed(Allowed {
             remaining: Some(state.tokens as usize),
         });
-    }
-
-    #[inline]
-    fn eviction(
-        &self,
-        state: &Self::State,
-        input: Self::Input,
-    ) -> crate::store::eviction::Eviction {
-        let missing_tokens = self.max_capacity - state.tokens;
-        let refill_secs = missing_tokens / self.refill_rate;
-        let refill_duration = if refill_secs.is_finite() {
-            Duration::from_secs_f64(refill_secs)
-        } else {
-            Duration::ZERO
-        };
-
-        Eviction::new(
-            missing_tokens.abs() < f64::EPSILON,
-            Some(input.now + refill_duration),
-        )
     }
 }

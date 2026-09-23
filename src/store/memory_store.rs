@@ -1,14 +1,10 @@
-use super::eviction::{Eviction, EvictionTask};
 use super::{Entry, KeyRef, Store};
-use crate::types::Version;
 use ahash::RandomState;
 use dashmap::DashMap;
-use futures_util::StreamExt;
-use std::{borrow::Borrow, hash::Hash, sync::Arc};
+use std::time::Duration;
+use std::{borrow::Borrow, hash::Hash};
 use thiserror::Error;
-use tokio::sync::mpsc;
 use tokio::time::Instant;
-use tokio_util::time::DelayQueue;
 
 #[derive(Debug)]
 pub struct InMemoryStore<K, V>
@@ -16,8 +12,7 @@ where
     K: Hash + Eq + Send + Sync,
     V: Send + Sync,
 {
-    data: Arc<DashMap<KeyRef<K>, Entry<V>, RandomState>>,
-    tx: mpsc::Sender<EvictionTask<K>>,
+    data: DashMap<KeyRef<K>, Entry<V>, RandomState>,
 }
 
 impl<K, V> InMemoryStore<K, V>
@@ -31,39 +26,9 @@ where
     }
 
     pub fn with_capacity(capacity: usize) -> Self {
-        let data = Arc::new(DashMap::with_capacity_and_hasher(
-            capacity,
-            RandomState::new(),
-        ));
-        let (tx, mut rx) = mpsc::channel::<EvictionTask<K>>(1024);
-
-        let store_data = Arc::clone(&data);
-        tokio::spawn(async move {
-            let mut queue = DelayQueue::<(Arc<K>, Version)>::with_capacity(capacity);
-
-            loop {
-                tokio::select! {
-                    biased;
-
-                    Some(task) = rx.recv() => {
-                        if let Some(expired_at) = task.eviction.expires_at() {
-                            let duration = expired_at.saturating_duration_since(Instant::now());
-                            queue.insert((task.key, task.version), duration);
-                        }
-                    }
-                    Some(expired) = queue.next(), if !queue.is_empty() => {
-                        let (key, expired_version) = expired.into_inner();
-
-                        store_data.remove_if(&*key, |_k, entry: &Entry<V>| {
-                            entry.version == expired_version
-                        });
-                    }
-                    else => break,
-                }
-            }
-        });
-
-        Self { data, tx }
+        Self {
+            data: DashMap::with_capacity_and_hasher(capacity, RandomState::new()),
+        }
     }
 }
 
@@ -108,6 +73,7 @@ where
     fn update<Q, I, F, R>(
         &self,
         key: &Q,
+        now: Instant,
         init: I,
         mutate: F,
     ) -> impl Future<Output = Result<R, InMemoryStoreError>> + Send
@@ -116,41 +82,30 @@ where
         Q: ?Sized + Hash + Eq + ToOwned<Owned = Self::Key>,
         R: Send,
         I: FnOnce() -> Self::State + Send,
-        F: FnOnce(&mut Entry<Self::State>) -> (R, Eviction) + Send + Sync,
+        F: FnOnce(&mut Self::State) -> R + Send + Sync,
     {
-        let (res, version, eviction, key_arc) = if let Some(mut state) = self.data.get_mut(key) {
-            let res = mutate(&mut state.value_mut());
-            let task_key = Arc::clone(&state.key().0);
-            (res.0, state.value().version, res.1, task_key)
-        } else {
-            let key_arc = Arc::new(key.to_owned());
-            let mut state = self
-                .data
-                .entry(KeyRef(Arc::clone(&key_arc)))
-                .or_insert_with(|| Entry::new(init()));
-            let res = mutate(&mut state.value_mut());
-            (res.0, state.value().version, res.1, key_arc)
+        let res = match self.data.get_mut(key) {
+            Some(mut entry) => {
+                let r = mutate(&mut entry.value_mut().state);
+                entry.value_mut().touch(now);
+                r
+            }
+            None => {
+                let mut entry = self
+                    .data
+                    .entry(KeyRef(std::sync::Arc::new(key.to_owned())))
+                    .or_insert_with(|| Entry::new(init(), now));
+                let r = mutate(&mut entry.value_mut().state);
+                entry.value_mut().touch(now);
+                r
+            }
         };
-        if eviction.expires_at().is_some() {
-            let task = EvictionTask {
-                key: key_arc,
-                version,
-                eviction,
-            };
-            let _ = self.tx.try_send(task);
-        }
         std::future::ready(Ok(res))
     }
-
-    fn remove_if<Q>(
-        &self,
-        key: &Q,
-        f: impl FnOnce(&KeyRef<Self::Key>, &Entry<V>) -> bool,
-    ) -> Option<(KeyRef<Self::Key>, Entry<V>)>
-    where
-        KeyRef<Self::Key>: Borrow<Q>,
-        Q: ?Sized + Hash + Eq + ToOwned<Owned = Self::Key>,
-    {
-        self.data.remove_if(key, f)
+    fn evict_idle(&self, now: Instant, max_idle: Duration) -> usize {
+        let before = self.data.len();
+        self.data
+            .retain(|_, entry| now.saturating_duration_since(entry.last_accessed) < max_idle);
+        before - self.data.len()
     }
 }

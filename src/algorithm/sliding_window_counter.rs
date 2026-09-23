@@ -1,8 +1,7 @@
 use tokio::time::Instant;
 
-use crate::{store::eviction::Eviction, types::Quota};
-
-use super::Algorithm;
+use super::{Algorithm, types::Now};
+use crate::types::Quota;
 
 #[derive(Clone, Copy, Debug)]
 pub struct SlidingWindowCounterState {
@@ -21,10 +20,22 @@ impl SlidingWindowCounter {
     pub fn new(quota: Quota) -> Self {
         Self { quota }
     }
+
+    // #[inline]
+    // fn eviction(
+    //     &self,
+    //     state: &SlidingWindowCounterState,
+    //     now: Now,
+    // ) -> crate::store::eviction::Eviction {
+    //     let expires_at = state.window_start + (self.quota.get_window() * 2);
+    //     let is_expired = *now >= expires_at;
+
+    //     Eviction::new(is_expired, Some(expires_at))
+    // }
 }
 
 impl Algorithm for SlidingWindowCounter {
-    type Input = Instant;
+    type Input = Now;
     type State = SlidingWindowCounterState;
     type Response = bool;
 
@@ -33,7 +44,7 @@ impl Algorithm for SlidingWindowCounter {
         SlidingWindowCounterState {
             last_window_count: 0,
             count: 0,
-            window_start: now,
+            window_start: *now,
         }
     }
 
@@ -48,7 +59,7 @@ impl Algorithm for SlidingWindowCounter {
                 0
             };
             state.count = 0;
-            state.window_start = now;
+            state.window_start = *now;
         }
         let max_capacity = self.quota.get_max_capacity();
         if state.count > max_capacity {
@@ -65,13 +76,5 @@ impl Algorithm for SlidingWindowCounter {
 
         state.count += 1;
         true
-    }
-
-    #[inline]
-    fn eviction(&self, state: &Self::State, now: Self::Input) -> crate::store::eviction::Eviction {
-        let expires_at = state.window_start + (self.quota.get_window() * 2);
-        let is_expired = now >= expires_at;
-
-        Eviction::new(is_expired, Some(expires_at))
     }
 }
